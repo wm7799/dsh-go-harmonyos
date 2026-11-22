@@ -417,6 +417,22 @@ build_abi() {
   # APKs can only carry lib*.so, so the DT_NEEDED/SONAME "libtalloc.so.2" becomes "libtalloc.so".
   "${PY[@]}" patch-dynstr "$jni/libproot.so" libtalloc.so.2 libtalloc.so >&2
   "${PY[@]}" patch-dynstr "$jni/libtalloc.so" libtalloc.so.2 libtalloc.so >&2
+
+  # -- noclone3 launcher: a PIE helper that installs a clone3(2)->ENOSYS seccomp
+  #    filter (HarmonyOS / Zhuoyitong compatibility), then execs PRoot. Compiled
+  #    from runtime/native/noclone3_launcher.c with the pinned NDK. It is a
+  #    standalone executable named lib*.so so it lands in APK jniLibs/<abi>/
+  #    and is extracted to nativeLibraryDir (useLegacyPackaging=true). --
+  local ndk="${ANDROID_NDK_HOME:-${ANDROID_HOME:-}/ndk/28.2.13676358}"
+  local cc_triple
+  case "$abi" in
+    arm64-v8a) cc_triple=aarch64-linux-android ;;
+    x86_64)    cc_triple=x86_64-linux-android ;;
+  esac
+  local ndk_cc="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/${cc_triple}21-clang"
+  [[ -x $ndk_cc ]] || die "noclone3: NDK clang not found at $ndk_cc (set ANDROID_NDK_HOME)"
+  "$ndk_cc" -O2 -fPIE -pie -fno-asynchronous-unwind-tables -Wl,--build-id=none \
+    -o "$jni/libnoclone3_launcher.so" "$HERE/native/noclone3_launcher.c"
   chmod 0755 "$jni"/*.so
   "${PY[@]}" elf-info "$jni"/*.so > "$work/jni-elf.json"
 
@@ -431,6 +447,7 @@ src = {
   "libtalloc.so": ("libtalloc", "$TALLOC_VERSION", "$(basename "$talloc_deb")", "usr/lib/libtalloc.so.$TALLOC_VERSION",
                    "DT_SONAME libtalloc.so.2 -> libtalloc.so", "$orig_talloc"),
   "libandroid-shmem.so": ("libandroid-shmem", "$SHMEM_VERSION", "$(basename "$shmem_deb")", "usr/lib/libandroid-shmem.so", None, None),
+  "libnoclone3_launcher.so": ("noclone3-launcher", "1", "native/noclone3_launcher.c", "native/noclone3_launcher.c", "PIE exec: clone3->ENOSYS seccomp filter", None),
 }
 res = {}
 for name, (pkg, ver, deb, inner, patch, orig) in src.items():
