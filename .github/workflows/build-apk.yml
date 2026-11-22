@@ -1,0 +1,97 @@
+name: Build HarmonyOS-port APK
+
+# Builds the arm64 APK with the HarmonyOS/Zhuoyitong compatibility fixes applied,
+# entirely on GitHub Actions. runtime/build-runtime.sh downloads and verifies its
+# own pinned inputs, so no external caches are required.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apk-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: 3.47.7
+  NODE_VERSION: 24.22.1
+  JAVA_VERSION: '17'
+  TZ: Asia/Shanghai
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          gradle-version: 9.3.1
+
+      # ubuntu-24.04 images ship the Android SDK; install the exact pinned NDK
+      # required by tawcroot plus the platform/build-tools Gradle needs.
+      - name: Android SDK platform and NDK
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-36" "build-tools;36.0.0" \
+            "ndk;28.2.13676358"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+
+      - name: Flutter dependencies and local.properties
+        working-directory: app
+        run: |
+          flutter pub get --enforce-lockfile
+          printf 'sdk.dir=%s\nflutter.sdk=%s\n' "$ANDROID_HOME" "$FLUTTER_ROOT" > android/local.properties
+
+      # Build the bundled arm64 runtime (rootfs + pinned JNI libs). Downloads are
+      # hash-verified on every run; nothing here trusts a stale cache.
+      - name: Build arm64 runtime bundle
+        run: |
+          runtime/build-runtime.sh arm64-v8a
+          python3 -I tooling/check_runtime_bundle.py arm64
+
+      # The companion pack is licensed and not in the repo. A test build without
+      # it still produces a fully installable APK for verifying the port.
+      - name: Build APK (arm64, no companion pack)
+        env:
+          DSH_MAVEN_MIRRORS: '0'
+        run: |
+          bash tooling/build-apk.sh --no-companion -f arm64
+
+      - name: Locate and report APK
+        id: apk
+        run: |
+          apk=$(find app/build/app/outputs/flutter-apk -name '*.apk' -type f | head -1)
+          test -n "$apk" || { echo "no APK produced" >&2; exit 1; }
+          echo "path=$apk" >> "$GITHUB_OUTPUT"
+          echo "name=$(basename "$apk")" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(sha256sum "$apk" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          ls -lh "$apk"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dsh-go-1.3.0-harmonyos-arm64
+          path: ${{ steps.apk.outputs.path }}
+          if-no-files-found: error
+          retention-days: 30
