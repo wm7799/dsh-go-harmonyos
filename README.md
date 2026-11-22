@@ -1,3 +1,26 @@
+# dsh-go-harmonyos
+
+基于上游 **ccch1mneyyy/dsh-Go 1.3.0**，移植鸿蒙 / 卓易通兼容性修复后的 Android 版本，使 dsh-Go 能在华为鸿蒙 NEXT 的卓易通（Android 兼容层）环境下正常启动运行。
+
+## 参考的两个开源项目
+
+本项目的修复源自以下两个项目，在此致谢：
+
+1. **[QQZping/dsh-go-huawei-droitong](https://github.com/QQZping/dsh-go-huawei-droitong)** —— 其 v.2 版本专门解决了 dsh-Go 在鸿蒙 / 卓易通下的问题，但基于 **1.0.16**。本项目把它的修复增量移植到 1.3.0。
+2. **[ccch1mneyyy/dsh-Go](https://github.com/ccch1mneyyy/dsh-Go)** —— 官方上游，已更新到 **1.3.0**。本项目以它为基线（HEAD `3c8637d`），保留其 tawcroot / Direct 双引擎逻辑，只做增量修复。
+
+## 移植内容与构建
+
+- `DshProcess.kt`（9 个 hunk）：`noSeccomp` / `prootLaunch`、`prootNodeCommand` 直启 Node、`installNoClone3Launcher`（clone3→ENOSYS seccomp 前置）、`PROOT_NO_SECCOMP`、放宽 `reapStrays` + `pidHint`。
+- `CrashClassifier.kt`：新增 `isProotSeccompFailure` / `isProotCwdFailure`。
+- 逐条落点与验收见 [`docs/harmonyos-port/PORT-NOTES.md`](docs/harmonyos-port/PORT-NOTES.md) 和 [`VERIFY.md`](docs/harmonyos-port/VERIFY.md)。
+
+**构建 APK**：在 Actions 页运行 **Build HarmonyOS-port APK** → Run workflow，云端构建 arm64 APK，产物在 run 页面 Artifacts（`dsh-go-1.3.0-harmonyos-arm64`）。配置见 [`.github/workflows/build-apk.yml`](.github/workflows/build-apk.yml)。此包为验证用途（`--no-companion` + debug key 签名），非正式发版。
+
+以下为上游 dsh-Go 原始文档：
+
+---
+
 <p align="center">
   <b>简体中文</b> · <a href="README.en.md">English</a>
 </p>
